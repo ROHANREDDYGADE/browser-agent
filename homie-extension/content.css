@@ -1,0 +1,346 @@
+/* ── Homie v2 Extension ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap');
+
+#homie-root {
+  all: initial;
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 2147483647;
+  font-family: 'DM Sans', sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+
+/* ── Bubble ── */
+#homie-bubble {
+  pointer-events: all;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: #0a0a0a;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.12), 0 4px 20px rgba(0,0,0,0.7);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s cubic-bezier(.34,1.56,.64,1), box-shadow 0.18s;
+  position: relative;
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#homie-bubble:hover {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.22), 0 8px 28px rgba(0,0,0,0.8);
+  transform: scale(1.06);
+}
+#homie-bubble.dragging {
+  cursor: grabbing !important;
+  transform: scale(1.1) !important;
+  transition: none !important;
+}
+#homie-bubble svg { width: 22px; height: 22px; pointer-events: none; }
+
+#homie-badge {
+  position: absolute;
+  top: -2px; right: -2px;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #0a0a0a;
+  display: none;
+}
+#homie-badge.visible { display: block; }
+
+/* ── Panel ── */
+#homie-panel {
+  pointer-events: all;
+  width: 380px;
+  height: 560px;
+  background: #080808;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.03), 0 28px 64px rgba(0,0,0,0.9);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform-origin: bottom right;
+  transition: transform 0.26s cubic-bezier(.34,1.2,.64,1), opacity 0.2s ease;
+}
+#homie-panel.hidden {
+  transform: scale(0.84) translateY(14px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Header ── */
+#homie-header {
+  background: #0e0e0e;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 12px 14px 10px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+#homie-header-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.1);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+#homie-header-avatar svg { width: 13px; height: 13px; }
+#homie-header-info { flex: 1; min-width: 0; }
+#homie-header-name {
+  font-family: 'Space Mono', monospace;
+  font-weight: 700; font-size: 11px;
+  color: #fff; letter-spacing: 1.8px;
+}
+#homie-header-status {
+  font-size: 10px; color: #444; margin-top: 2px;
+  display: flex; align-items: center; gap: 4px;
+  transition: color 0.3s;
+}
+#homie-status-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #333; transition: background 0.3s; flex-shrink: 0;
+}
+#homie-close-btn {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: transparent; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: #444; transition: background 0.15s, color 0.15s; flex-shrink: 0;
+}
+#homie-close-btn:hover { background: rgba(255,255,255,0.07); color: #bbb; }
+
+/* ── Mode Tabs ── */
+#homie-tabs {
+  display: flex;
+  background: #0e0e0e;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  padding: 0 14px;
+  gap: 2px;
+}
+.homie-tab {
+  flex: 1;
+  padding: 9px 0 8px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #444;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.homie-tab:hover { color: #888; }
+.homie-tab.active {
+  color: #fff;
+  border-bottom-color: #fff;
+}
+.homie-tab svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* ── Mode Panes ── */
+.homie-pane { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+.homie-pane.active { display: flex; }
+
+/* ── Messages (shared) ── */
+.homie-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.07) transparent;
+}
+.homie-messages::-webkit-scrollbar { width: 3px; }
+.homie-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+.homie-msg-row { display: flex; gap: 7px; align-items: flex-end; animation: homie-fadein 0.18s ease; }
+.homie-msg-row.user { flex-direction: row-reverse; }
+
+@keyframes homie-fadein {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.homie-bubble-ai, .homie-bubble-user {
+  max-width: 83%; padding: 8px 12px; border-radius: 14px;
+  font-size: 13px; line-height: 1.55; word-break: break-word; white-space: pre-wrap;
+}
+.homie-bubble-ai {
+  background: #161616; border: 1px solid rgba(255,255,255,0.07);
+  color: #ccc; border-bottom-left-radius: 3px;
+}
+.homie-bubble-user {
+  background: #fff; color: #080808;
+  border-bottom-right-radius: 3px; font-weight: 500;
+}
+
+/* Computer mode action bubbles */
+.homie-bubble-action {
+  max-width: 92%;
+  padding: 7px 11px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: #111;
+  border: 1px solid rgba(255,255,255,0.06);
+  color: #666;
+  font-family: 'Space Mono', monospace;
+  border-bottom-left-radius: 3px;
+}
+.homie-bubble-action .action-label {
+  font-size: 9px; letter-spacing: 1px; color: #444;
+  text-transform: uppercase; margin-bottom: 3px;
+}
+.homie-bubble-action .action-text { color: #aaa; }
+.homie-bubble-action.done .action-label { color: #555; }
+.homie-bubble-action.done { border-color: rgba(255,255,255,0.1); }
+
+/* Screenshot preview */
+.homie-screenshot {
+  max-width: 92%;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+  overflow: hidden;
+  cursor: pointer;
+}
+.homie-screenshot img { width: 100%; display: block; }
+.homie-screenshot-label {
+  font-size: 10px; color: #444; padding: 4px 8px;
+  background: #111; font-family: 'Space Mono', monospace;
+}
+
+.homie-avatar-sm {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #161616; border: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 2px;
+}
+.homie-avatar-sm svg { width: 10px; height: 10px; }
+
+/* Typing */
+.homie-typing { display: flex; align-items: center; gap: 4px; padding: 10px 14px; }
+.homie-typing span {
+  width: 5px; height: 5px; border-radius: 50%; background: #333;
+  animation: homie-dot 1.1s ease-in-out infinite;
+}
+.homie-typing span:nth-child(2) { animation-delay: 0.18s; }
+.homie-typing span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes homie-dot {
+  0%,60%,100% { transform: translateY(0); opacity: 0.3; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.homie-sys {
+  text-align: center; font-size: 11px; color: #2a2a2a;
+  font-style: italic; padding: 2px 0;
+}
+
+/* ── Input Bar ── */
+.homie-input-bar {
+  background: #0e0e0e;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 10px 11px;
+  display: flex; gap: 7px; align-items: flex-end;
+  flex-shrink: 0;
+}
+.homie-input {
+  flex: 1; background: #161616;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 11px; color: #ddd;
+  font-family: 'DM Sans', sans-serif; font-size: 13px;
+  padding: 8px 12px; outline: none; resize: none;
+  min-height: 36px; max-height: 90px;
+  overflow-y: auto; line-height: 1.5;
+  transition: border-color 0.2s; scrollbar-width: none;
+}
+.homie-input:focus { border-color: rgba(255,255,255,0.25); }
+.homie-input::placeholder { color: rgba(255,255,255,0.16); }
+.homie-input:disabled { opacity: 0.3; }
+
+.homie-send-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: #fff; border: none; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.14s, opacity 0.14s, background 0.14s;
+  flex-shrink: 0;
+}
+.homie-send-btn:hover { transform: scale(1.07); background: #e8e8e8; }
+.homie-send-btn:active { transform: scale(0.93); }
+.homie-send-btn:disabled { opacity: 0.18; cursor: not-allowed; transform: none; }
+.homie-send-btn svg { width: 15px; height: 15px; }
+
+/* ── Computer mode stop button ── */
+#homie-stop-btn {
+  display: none;
+  width: 36px; height: 36px; border-radius: 10px;
+  background: #1a1a1a; border: 1px solid rgba(255,255,255,0.12);
+  cursor: pointer; flex-shrink: 0;
+  align-items: center; justify-content: center;
+  transition: background 0.14s;
+}
+#homie-stop-btn.visible { display: flex; }
+#homie-stop-btn:hover { background: #2a2a2a; }
+#homie-stop-btn svg { width: 14px; height: 14px; }
+
+/* ── Computer mode status bar ── */
+#homie-computer-bar {
+  background: #0a0a0a;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: 7px 14px;
+  display: flex; align-items: center; gap: 8px;
+  flex-shrink: 0; font-size: 11px; color: #333;
+  font-family: 'Space Mono', monospace;
+}
+#homie-computer-bar .step-count { color: #555; margin-left: auto; }
+#homie-running-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #fff; flex-shrink: 0;
+  animation: homie-pulse 1s ease-in-out infinite;
+  display: none;
+}
+#homie-running-dot.visible { display: block; }
+@keyframes homie-pulse {
+  0%,100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Settings / API key input (computer mode) ── */
+#homie-apikey-bar {
+  background: #0e0e0e;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 8px 12px;
+  display: flex; gap: 7px; align-items: center;
+  flex-shrink: 0;
+}
+#homie-apikey-input {
+  flex: 1; background: #161616;
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 8px; color: #aaa;
+  font-family: 'Space Mono', monospace; font-size: 11px;
+  padding: 6px 10px; outline: none;
+  transition: border-color 0.2s;
+}
+#homie-apikey-input:focus { border-color: rgba(255,255,255,0.22); color: #ddd; }
+#homie-apikey-input::placeholder { color: #333; }
+#homie-apikey-save {
+  padding: 6px 11px; border-radius: 8px;
+  background: #1a1a1a; border: 1px solid rgba(255,255,255,0.1);
+  color: #aaa; font-size: 11px; cursor: pointer;
+  font-family: 'Space Mono', monospace; white-space: nowrap;
+  transition: background 0.14s, color 0.14s;
+}
+#homie-apikey-save:hover { background: #252525; color: #fff; }
