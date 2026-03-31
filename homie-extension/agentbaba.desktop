@@ -3,8 +3,7 @@ Version=1.0
 Type=Application
 Name=AgentBaba
 Comment=AI Browser Agent
-Exec=bash -c 'rm -rf /tmp/oranis-profile && /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && /usr/bin/oranis --new-window --force-device-scale-factor=1 --load-extension=/home/baba/browser-agent/homie-extension --window-size=1200,600 --window-position=0,0 --user-data-dir=/tmp/oranis-profile --no-first-run --no-default-browser-check --disable-session-restore'
-Icon=/home/baba/browser-agent/homie-extension/icons/icon128.png
+Exec=bash -c 'read W H <<< $(wlr-randr | grep -m1 -E "[0-9]+x[0-9]+" | sed -E "s/.* ([0-9]+)x([0-9]+).*/\1 \2/"); WW=$((W*70/100)); WH=$((H*60/100)); PX=$(((W-WW)/2)); PY=40; rm -rf /tmp/oranis-profile && /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && /usr/bin/oranis --new-window --window-size=${WW},${WH} --window-position=${PX},${PY} --user-data-dir=/tmp/oranis-profile --no-first-run --no-default-browser-check --disable-session-restore --load-extension=/home/baba/browser-agent/homie-extension'
 Terminal=false
 Categories=Network;
 StartupNotify=true
