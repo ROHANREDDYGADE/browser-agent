@@ -115,8 +115,8 @@ const AI_WS = 'wss://nfapi.nofrills.ai/ws/voice/chat/';
 let wsReady=false, wsPending=null, wsLiveEl=null, wsObj=null;
 
 async function connectWS() {
-  const cookies = await chrome.cookies.getAll({ name: 'qwise_user_token' }).catch(()=>[]);
-  const token = cookies[0] ? decodeURIComponent(cookies[0].value) : '';
+  const stored = await chrome.storage.local.get('qwise_user_token');
+  const token = stored['qwise_user_token'] ? decodeURIComponent(stored['qwise_user_token']) : '';
   if (!token) { sysMsg(msgsChat,'⚠ No token — log in to Homie first','#ff5555'); return; }
   setStatus('connecting…','');
   const ws = new WebSocket(`${AI_WS}?token=${token}`);
