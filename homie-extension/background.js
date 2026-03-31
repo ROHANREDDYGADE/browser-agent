@@ -1,7 +1,25 @@
 // background.js — Homie v6 DOM-based agent (fixed)
 // FIX 1: Inject content.js into the tab immediately on START_CUA
 // FIX 2: Stop works immediately by checking flag before every step
+// Load token from token.json → chrome.storage
+async function loadToken() {
+  try {
+    const res = await fetch(chrome.runtime.getURL("token.json"));
+    const data = await res.json();
 
+    if (data.token) {
+      await chrome.storage.local.set({
+        qwise_user_token: data.token
+      });
+      console.log("✅ Token loaded");
+    }
+  } catch (e) {
+    console.log("No token.json yet");
+  }
+}
+
+// run on startup
+loadToken();
 const state = {
   running:        false,
   stopRequested:  false,
