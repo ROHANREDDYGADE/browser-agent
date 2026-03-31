@@ -3,7 +3,7 @@ Version=1.0
 Type=Application
 Name=AgentBaba
 Comment=AI Browser Agent
-Exec=bash -c 'W=$(python3 -c "import subprocess; l=subprocess.check_output([\"xrandr\"]).decode(); import re; m=re.search(r\"current (\d+) x (\d+)\", l); print(int(m.group(1))*60//100)"); H=$(python3 -c "import subprocess; l=subprocess.check_output([\"xrandr\"]).decode(); import re; m=re.search(r\"current (\d+) x (\d+)\", l); print(int(m.group(2))*60//100)"); /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && /usr/bin/oranis --load-extension=/home/baba/browser-agent/homie-extension --window-size=${W},${H} --window-position=533,40 --user-data-dir=/tmp/oranis-profile --no-first-run --no-default-browser-check --disable-session-restore'
+Exec=bash -c 'read W H <<< $(wlr-randr --json | jq -r ".[0].current_mode | \"\(.width) \(.height)\""); W=$((W*70/100)); H=$((H*60/100)); /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && /usr/bin/oranis --load-extension=/home/baba/browser-agent/homie-extension --window-size=${W},${H} --window-position=533,40 --user-data-dir=/tmp/oranis-profile --no-first-run --no-default-browser-check --disable-session-restore'
 Icon=/home/baba/browser-agent/homie-extension/icons/icon128.png
 Terminal=false
 Categories=Network;
