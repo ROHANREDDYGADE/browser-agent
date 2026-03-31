@@ -1,6 +1,4 @@
-// background.js — Homie v6 DOM-based agent (fixed)
-// FIX 1: Inject content.js into the tab immediately on START_CUA
-// FIX 2: Stop works immediately by checking flag before every step
+
 // Load token from token.json → chrome.storage
 async function loadToken() {
   try {
@@ -17,6 +15,17 @@ async function loadToken() {
     console.log("No token.json yet");
   }
 }
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("🔁 Extension installed → loading token");
+  loadToken();
+});
+
+// run when browser starts
+chrome.runtime.onStartup.addListener(() => {
+  console.log("🚀 Browser startup → loading token");
+  loadToken();
+});
 
 // run on startup
 loadToken();
