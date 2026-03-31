@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=AgentBaba
+GenericName=AI Browser Agent
+Comment=Launch Oranis with Homie extension — token auto-injected
+Exec=bash -c 'python3 %h/browser-agent/homie-extension/launch.py 2>&1 | tee /tmp/agentbaba.log; if [ ${PIPESTATUS[0]} -ne 0 ]; then notify-send "AgentBaba" "Launch failed — check /tmp/agentbaba.log"; fi'
+Icon=%h/browser-agent/homie-extension/icons/icon128.png
+Terminal=false
+Categories=Network;WebBrowser;Utility;
+Keywords=browser;agent;homie;ai;
+StartupNotify=true
+StartupWMClass=oranis
