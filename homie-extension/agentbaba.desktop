@@ -3,7 +3,7 @@ Version=1.0
 Type=Application
 Name=AgentBaba
 Comment=AI Browser Agent
-Exec=bash -c 'rm -rf /tmp/oranis-profile && /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && /usr/bin/oranis --new-window --force-device-scale-factor=1 --load-extension=/home/baba/browser-agent/homie-extension --window-size=800,600 --window-position=0,0 --user-data-dir=/tmp/oranis-profile --no-first-run --no-default-browser-check --disable-session-restore'
+Exec=bash -c 'rm -rf /tmp/oranis-profile && /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && /usr/bin/oranis --new-window --force-device-scale-factor=1 --load-extension=/home/baba/browser-agent/homie-extension --window-size=1200,600 --window-position=0,0 --user-data-dir=/tmp/oranis-profile --no-first-run --no-default-browser-check --disable-session-restore'
 Icon=/home/baba/browser-agent/homie-extension/icons/icon128.png
 Terminal=false
 Categories=Network;
