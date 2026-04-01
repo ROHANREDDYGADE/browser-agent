@@ -9,7 +9,7 @@ SCREEN=$(wlr-randr | grep "current" | grep -oP '\d+x\d+' | head -1)
 SCREEN_W=$(echo $SCREEN | cut -dx -f1)
 SCREEN_H=$(echo $SCREEN | cut -dx -f2)
 WIN_W=$(echo "$SCREEN_W * 70 / 100" | bc)
-WIN_H=$(echo "$SCREEN_H * 60 / 100" | bc)
+WIN_H=$(echo "$SCREEN_H * 10 / 100" | bc)
 
 echo "Screen: ${SCREEN_W}x${SCREEN_H} → Window: ${WIN_W}x${WIN_H}" >> /tmp/browser_launch.log
 
