@@ -3,14 +3,7 @@ Version=1.0
 Type=Application
 Name=AgentBaba
 Comment=AI Browser Agent
-Exec=bash -c '/usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py && python3 -c "
-import json, os
-pref = os.path.expanduser(\"~/.config/chromium/Default/Preferences\")
-if os.path.exists(pref):
-    d = json.load(open(pref))
-    d.setdefault(\"extensions\", {}).setdefault(\"ui\", {})[\"developer_mode\"] = True
-    json.dump(d, open(pref, \"w\"))
-" && /usr/bin/chromium --new-window --force-device-scale-factor=1 --load-extension=/home/baba/browser-agent/homie-extension --window-size=1200,600 --window-position=0,0 --no-first-run --no-default-browser-check --disable-session-restore'
+Exec=/home/baba/browser-agent/homie-extension/launch-agent.sh
 Icon=/home/baba/browser-agent/homie-extension/icons/icon128.png
 Terminal=false
 Categories=Network;
