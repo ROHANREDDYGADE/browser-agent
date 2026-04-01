@@ -286,7 +286,8 @@ RULES:
     3. Find the exact date number element in the calendar grid and click it directly
     4. Never try to type a date into a calendar picker — always click the date
 - After each navigation or major click, wait for the page to settle before acting
-- When the task is complete use done with a full helpful answer`;
+- When the task is complete use done with a full helpful answer
+- Ater task completed if the task details are in that page give them to user`;
 
   const MAX = 30;
 
