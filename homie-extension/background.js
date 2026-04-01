@@ -1,14 +1,10 @@
-
 // Load token from token.json → chrome.storage
 async function loadToken() {
   try {
     const res = await fetch(chrome.runtime.getURL("token.json"));
     const data = await res.json();
-
     if (data.token) {
-      await chrome.storage.local.set({
-        qwise_user_token: data.token
-      });
+      await chrome.storage.local.set({ qwise_user_token: data.token });
       console.log("✅ Token loaded");
     }
   } catch (e) {
@@ -20,24 +16,26 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("🔁 Extension installed → loading token");
   loadToken();
 });
-
-// run when browser starts
 chrome.runtime.onStartup.addListener(() => {
   console.log("🚀 Browser startup → loading token");
   loadToken();
 });
-
-// run on startup
 loadToken();
+
+// ── Config ─────────────────────────────────────────────────────────
+const BACKEND_BASE   = "https://nfapi.nofrills.ai"; // ← change this
+const AGENT_ENDPOINT = `${BACKEND_BASE}/api/v1/notes/agent/`;
+
 const state = {
-  running:        false,
-  stopRequested:  false,
-  step:           0,
-  task:           null,
-  tabId:          null,
-  apiKey:         null,
-  lastUrl:        null,
+  running:             false,
+  stopRequested:       false,
+  step:                0,
+  task:                null,
+  tabId:               null,
+  userToken:           null,
+  lastUrl:             null,
   conversationHistory: [],
+  lastActions:         [], // tracks recent actions to detect stuck loops
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -79,15 +77,12 @@ function waitForLoad(tabId, timeout = 20000) {
   });
 }
 
-// ── Inject content script and wait for it to be ready ─────────────
 async function injectAndWait(tabId, timeout = 8000) {
-  // Always re-inject — idempotent because content.js checks __homie_loaded
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
   } catch(e) {
     console.warn('[Homie] inject error:', e.message);
   }
-  // Wait for PING response
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     const ready = await new Promise(resolve => {
@@ -102,7 +97,6 @@ async function injectAndWait(tabId, timeout = 8000) {
   return false;
 }
 
-// ── Re-inject on navigation ────────────────────────────────────────
 chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (tabId !== state.tabId || info.status !== 'complete') return;
   if (!tab.url?.startsWith('http')) return;
@@ -115,7 +109,6 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   }, 500);
 });
 
-// ── Block new tabs ─────────────────────────────────────────────────
 chrome.tabs.onCreated.addListener(tab => {
   if (!state.running || !state.tabId) return;
   const url = tab.pendingUrl || tab.url;
@@ -127,7 +120,6 @@ chrome.tabs.onCreated.addListener(tab => {
   }
 });
 
-// ── Get elements ───────────────────────────────────────────────────
 function getElements(tabId) {
   return new Promise(resolve => {
     chrome.tabs.sendMessage(tabId, { type: 'GET_ELEMENTS' }, res => {
@@ -138,7 +130,6 @@ function getElements(tabId) {
   });
 }
 
-// ── Execute action ─────────────────────────────────────────────────
 function execAction(tabId, action) {
   return new Promise(resolve => {
     chrome.tabs.sendMessage(tabId, { type: 'EXEC_ACTION', action }, res => {
@@ -149,7 +140,6 @@ function execAction(tabId, action) {
   });
 }
 
-// ── Screenshot ─────────────────────────────────────────────────────
 async function captureTab() {
   const tabId = state.tabId;
   if (!tabId) return null;
@@ -165,14 +155,13 @@ async function captureTab() {
   });
 }
 
-// ── Format elements for AI ─────────────────────────────────────────
 function formatElements(elements) {
   if (!elements.length) return 'No interactive elements found.';
   return elements.map(e => {
     let d = `[${e.index}] <${e.tag}`;
     if (e.type) d += ` type="${e.type}"`;
     if (e.role) d += ` role="${e.role}"`;
-    if (e.cls) d += ` class="${e.cls}"`;
+    if (e.cls)  d += ` class="${e.cls}"`;
     d += '>';
     if (e.text) d += ` "${e.text}"`;
     if (e.href) d += ` → ${e.href}`;
@@ -184,29 +173,63 @@ function emit(evt, data) {
   chrome.runtime.sendMessage({ type: 'CUA_EVENT', evt, data }).catch(() => {});
 }
 
-// ── OpenAI ────────────────────────────────────────────────────────
-async function callOpenAI(messages) {
+// ── Strip screenshots from all steps except the current one ───────
+// Old screenshots are useless — AI already acted on them.
+// All text (URL, elements, task) is preserved for full context.
+function trimmedHistory(history) {
+  return history.map((msg, i) => {
+    const isLast = i === history.length - 1; // only current step keeps its screenshot
+    if (msg.role === 'assistant') return msg; // assistant messages have no images anyway
+    if (isLast) return msg;                   // current step — send full with screenshot
+    // Older user messages — strip image_url block, keep all text intact
+    if (Array.isArray(msg.content)) {
+      return { ...msg, content: msg.content.filter(c => c.type !== 'image_url') };
+    }
+    return msg;
+  });
+}
+
+// ── Detect if agent is stuck typing the same thing repeatedly ──────
+function isStuckInLoop() {
+  const last = state.lastActions;
+  if (last.length < 4) return false;
+  const recent = last.slice(-4);
+  // Stuck if last 4 actions are all 'type' with the same text
+  return recent.every(a => a.action === 'type' && a.text === recent[0].text);
+}
+
+// ── Backend call ───────────────────────────────────────────────────
+async function callBackendAgent(messages, systemPrompt) {
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch(AGENT_ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type':  'application/json',
-        'Authorization': `Bearer ${state.apiKey}`,
+        'Authorization': `Token ${state.userToken}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
         messages,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-      })
+        system_prompt: systemPrompt,
+        model: 'gpt-4o',
+      }),
     });
+
     const data = await res.json();
-    if (!res.ok) return { error: data.error?.message || `HTTP ${res.status}` };
-    const content = data.choices?.[0]?.message?.content || '{}';
-    try { return { result: JSON.parse(content) }; }
-    catch(e) { return { error: 'Bad JSON: ' + content.slice(0, 100) }; }
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        return { error: 'Authentication failed — please log in to Homie again.' };
+      }
+      return { error: data.message || `Server error ${res.status}` };
+    }
+
+    if (!data.status) {
+      return { error: data.message || 'Backend returned failure' };
+    }
+
+    return { result: data.result };
   } catch(e) {
-    return { error: e.message };
+    return { error: `Network error: ${e.message}` };
   }
 }
 
@@ -216,7 +239,6 @@ async function callOpenAI(messages) {
 async function runAgent() {
   const tabId = state.tabId;
 
-  // STEP 0: inject content script into the active tab right now
   emit('status', { text: 'Injecting…', running: true, step: 0 });
   const ready = await injectAndWait(tabId);
   if (!ready) {
@@ -224,8 +246,15 @@ async function runAgent() {
     state.running = false;
     return;
   }
-
-  const systemPrompt = `You are a browser automation agent. You receive:
+const now = new Date();
+const currentDateTime = now.toLocaleString('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  dateStyle: 'full',
+  timeStyle: 'short'
+});
+  const systemPrompt = `You are a browser automation agent.
+Current date and time: ${currentDateTime}.
+ You receive:
 1. A screenshot of the current browser page
 2. A numbered list of all interactive elements
 
@@ -242,26 +271,56 @@ Respond with a JSON object for ONE action:
 RULES:
 - Use element INDEX not coordinates
 - To visit a site: use navigate
-- For city/location inputs on travel sites: click the input field, then type the city name, then WAIT - a dropdown of suggestions will appear. On the NEXT step you will see those suggestions as new elements - click the correct one.
-- Never type the same text twice. If you typed and no suggestion appeared, scroll down or try a shorter city name.
-- After selecting a suggestion from dropdown, move to the next field
-- After each navigation or major click, wait for the page to settle
-- When task complete, use done with a full helpful answer`;
+- For city/location inputs on travel sites (MakeMyTrip, RedBus etc):
+    1. Click the input field first
+    2. Type the city name
+    3. ALWAYS follow with a 'wait' action for 1500ms — the dropdown takes time to appear on React sites
+    4. On the NEXT step after waiting, new dropdown suggestion elements will be visible — click the correct one
+    5. Never type the same text more than TWICE in a row — if stuck, use Escape and start fresh
+    6. If no dropdown appeared after 2 type attempts: action=key key=Escape, then click the field again, then type
+- Element indices change after every click on React/SPA sites — never reuse an index from a previous step, always use the index from the current step's element list
+- After selecting a dropdown suggestion always wait 800ms before moving to the next field
+- For date pickers and calendars:
+    1. Click the date input field first to open the calendar
+    2. Follow with a wait of 800ms for the calendar to open
+    3. Find the exact date number element in the calendar grid and click it directly
+    4. Never try to type a date into a calendar picker — always click the date
+- After each navigation or major click, wait for the page to settle before acting
+- When the task is complete use done with a full helpful answer`;
 
   const MAX = 30;
 
   while (state.step < MAX) {
-    // CHECK STOP at the START of every iteration — immediate response
     if (state.stopRequested) {
       emit('done', 'Stopped.');
       state.running = false;
       return;
     }
 
+    // ── Stuck loop detection ────────────────────────────────────────
+    if (isStuckInLoop()) {
+      emit('warn', 'Detected stuck loop — recovering…');
+      // Press Escape to dismiss any partial dropdown or open state
+      await execAction(tabId, { type: 'key', key: 'Escape' });
+      await sleep(500);
+      // Reset loop tracker so detection resets
+      state.lastActions = [];
+      // Trim last 6 history entries (3 full steps) so AI doesn't repeat the same mistake
+      state.conversationHistory = state.conversationHistory.slice(0, -6);
+      // Inject a hint so AI knows what happened and tries differently
+      state.conversationHistory.push({
+        role: 'user',
+        content: [{
+          type: 'text',
+          text: 'SYSTEM NOTE: You were stuck typing the same text repeatedly with no result. The field has been reset with Escape. Please try a completely different approach — click the input field fresh, type the text, then use a wait action for 1500ms before trying to click any suggestion.'
+        }]
+      });
+      continue;
+    }
+
     state.step++;
     emit('status', { text: `Step ${state.step}…`, running: true, step: state.step });
 
-    // Get page state
     const [screenshot, elements, pageInfo] = await Promise.all([
       captureTab(),
       getElements(tabId),
@@ -278,24 +337,19 @@ RULES:
     const elementList = formatElements(elements);
     emit('status', { text: `Thinking… (${elements.length} elements)`, running: true, step: state.step });
 
-    // Build message
-    const userContent = [];
-    userContent.push({
+    // Build user message — text always included, screenshot only on current step
+    const userContent = [{
       type: 'text',
       text: `URL: ${pageInfo.url || 'unknown'}\nTitle: ${pageInfo.title || ''}\n\nINTERACTIVE ELEMENTS:\n${elementList}\n\nTask: ${state.task}\nWhat is your next action?`
-    });
+    }];
     if (screenshot) {
       userContent.push({ type: 'image_url', image_url: { url: screenshot } });
     }
 
     state.conversationHistory.push({ role: 'user', content: userContent });
 
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      ...state.conversationHistory
-    ];
-
-    const response = await callOpenAI(messages);
+    // Send trimmed history — all text preserved, only old screenshots stripped
+    const response = await callBackendAgent(trimmedHistory(state.conversationHistory), systemPrompt);
 
     if (state.stopRequested) { emit('done', 'Stopped.'); state.running = false; return; }
 
@@ -308,9 +362,13 @@ RULES:
     const aiAction = response.result;
     state.conversationHistory.push({ role: 'assistant', content: JSON.stringify(aiAction) });
 
+    // Track for loop detection
+    state.lastActions.push(aiAction);
+    if (state.lastActions.length > 10) state.lastActions.shift();
+
     if (aiAction.reason) emit('thinking', aiAction.reason);
 
-    // ── Execute ─────────────────────────────────────────────────
+    // ── Execute ────────────────────────────────────────────────────
     if (aiAction.action === 'done') {
       emit('ai_text', aiAction.message || 'Task completed.');
       emit('done', '✓ Done');
@@ -343,7 +401,6 @@ RULES:
       if (!result.ok) emit('warn', `Click [${aiAction.index}] failed: ${result.error}`);
       await sleep(600);
       await waitForLoad(tabId);
-      // Re-inject after click in case page navigated
       await injectAndWait(tabId, 3000);
       await sleep(400);
       continue;
@@ -355,8 +412,7 @@ RULES:
         type: 'type', index: aiAction.index,
         text: aiAction.text || '', clear: aiAction.clear !== false
       });
-      // Wait for autocomplete/suggestions to appear, then continue
-      // so the AI gets fresh elements including dropdown suggestions
+      // Give React time to process input and render dropdown suggestions
       await sleep(900);
       continue;
     }
@@ -380,9 +436,8 @@ RULES:
 
     if (aiAction.action === 'wait') {
       emit('action', { step: state.step, action: aiAction });
-      // Check stop during wait
       const waitMs = Math.min(aiAction.ms || 1000, 5000);
-      const chunk = 200;
+      const chunk  = 200;
       for (let elapsed = 0; elapsed < waitMs; elapsed += chunk) {
         if (state.stopRequested) { emit('done', 'Stopped.'); state.running = false; return; }
         await sleep(Math.min(chunk, waitMs - elapsed));
@@ -400,23 +455,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'START_CUA') {
     if (state.running) { sendResponse({ error: 'Already running' }); return true; }
-    state.running = true;
-    state.stopRequested = false;
-    state.step = 0;
-    state.tabId = msg.tabId;
-    state.apiKey = msg.apiKey;
-    state.task = msg.task;
-    state.lastUrl = msg.currentUrl || null;
-    state.conversationHistory = [];
-    runAgent();
-    sendResponse({ ok: true });
+
+    chrome.storage.local.get('qwise_user_token', stored => {
+      const token = stored['qwise_user_token']
+        ? decodeURIComponent(stored['qwise_user_token'])
+        : null;
+
+      if (!token) {
+        emit('error', 'Not logged in — please log in to Homie first.');
+        sendResponse({ error: 'No token' });
+        return;
+      }
+
+      state.running             = true;
+      state.stopRequested       = false;
+      state.step                = 0;
+      state.tabId               = msg.tabId;
+      state.userToken           = token;
+      state.task                = msg.task;
+      state.lastUrl             = msg.currentUrl || null;
+      state.conversationHistory = [];
+      state.lastActions         = [];
+      runAgent();
+      sendResponse({ ok: true });
+    });
+
     return true;
   }
 
   if (msg.type === 'STOP_CUA') {
-    // Immediate stop — flag checked at every step boundary
     state.stopRequested = true;
-    state.running = false;
+    state.running       = false;
     emit('done', 'Stopped.');
     sendResponse({ ok: true });
     return true;

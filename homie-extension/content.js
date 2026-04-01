@@ -164,49 +164,53 @@
     }
 
     // ── TYPE ─────────────────────────────────────────────────────
-    if (t === 'type') {
-      let el = null;
-      if (action.index !== undefined && action.index !== null) {
-        el = elementMap[action.index];
-      }
-      if (!el) el = document.activeElement;
-      if (!el || el === document.body || el === document.documentElement) {
-        return { ok: false, error: 'No element to type into' };
-      }
-
-      el.scrollIntoView({ block: 'center', behavior: 'instant' });
-      el.focus({ preventScroll: true });
-      await sleep(80);
-
-      if (el.isContentEditable) {
-        if (action.clear !== false) el.textContent = '';
-        document.execCommand('insertText', false, action.text || '');
-        return { ok: true };
-      }
-
-      // Clear
-      if (action.clear !== false) {
-        setNativeValue(el, '');
-        triggerInputEvents(el);
-        await sleep(50);
-      }
-
-      // Set value all at once
-      const newVal = (action.clear !== false ? '' : (el.value || '')) + (action.text || '');
-      setNativeValue(el, newVal);
-      triggerInputEvents(el);
-      await sleep(30);
-
-      // Fire keydown/up per char for autocomplete listeners
-      for (const char of (action.text || '')) {
-        el.dispatchEvent(new KeyboardEvent('keydown',  { key: char, code: `Key${char.toUpperCase()}`, bubbles: true, cancelable: true }));
-        el.dispatchEvent(new KeyboardEvent('keypress', { key: char, code: `Key${char.toUpperCase()}`, bubbles: true, cancelable: true }));
-        el.dispatchEvent(new KeyboardEvent('keyup',    { key: char, code: `Key${char.toUpperCase()}`, bubbles: true, cancelable: true }));
-        await sleep(10);
-      }
-
-      return { ok: true, value: el.value };
+  // Replace the TYPE section in execAction with this:
+  if (t === 'type') {
+    let el = null;
+    if (action.index !== undefined && action.index !== null) {
+      el = elementMap[action.index];
     }
+    if (!el) el = document.activeElement;
+    if (!el || el === document.body) return { ok: false, error: 'No element to type into' };
+
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    el.focus({ preventScroll: true });
+    await sleep(100);
+
+    if (el.isContentEditable) {
+      if (action.clear !== false) el.textContent = '';
+      document.execCommand('insertText', false, action.text || '');
+      return { ok: true };
+    }
+
+    // Clear properly
+    if (action.clear !== false) {
+      el.focus();
+      // Select all and delete — works better than setNativeValue for React
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+      await sleep(50);
+    }
+
+    // Type character by character with real input events — React needs this
+    for (const char of (action.text || '')) {
+      // Set value incrementally so React state updates per character
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value'
+      )?.set;
+      const currentVal = el.value;
+      if (nativeInputValueSetter) nativeInputValueSetter.call(el, currentVal + char);
+      else el.value = currentVal + char;
+
+      el.dispatchEvent(new KeyboardEvent('keydown',  { key: char, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('input',  { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: char, bubbles: true, cancelable: true }));
+      await sleep(40); // small delay between chars — gives React time to update
+    }
+
+    return { ok: true, value: el.value };
+  }
 
     // ── KEY ──────────────────────────────────────────────────────
     if (t === 'key') {
