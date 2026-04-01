@@ -1,12 +1,13 @@
 #!/bin/bash
-
+echo "$(date): Script triggered, caller: $(ps -p $PPID -o comm=)" >> /tmp/homie-launch.log
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 export WAYLAND_DISPLAY=wayland-1
 export XDG_RUNTIME_DIR=/run/user/1000
 
-# Prevent multiple instances
-if pgrep -f "chromium.*homie-extension" > /dev/null; then
-    echo "Chromium already running, exiting."
+# Lockfile guard
+LOCKFILE=/tmp/homie-chromium.lock
+if [ -f "$LOCKFILE" ] && kill -0 $(cat "$LOCKFILE") 2>/dev/null; then
+    echo "Already running (PID $(cat $LOCKFILE)), exiting."
     exit 0
 fi
 
@@ -35,4 +36,9 @@ rm -rf /tmp/chromium-profile
   --window-position=0,0 \
   --user-data-dir=/tmp/chromium-profile \
   --no-first-run --no-default-browser-check --disable-session-restore \
-  --ozone-platform=wayland
+  --ozone-platform=wayland &
+
+# Save PID and clean up lock when done
+echo $! > "$LOCKFILE"
+wait $!
+rm -f "$LOCKFILE"
