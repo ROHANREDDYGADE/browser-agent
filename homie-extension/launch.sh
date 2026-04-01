@@ -14,7 +14,7 @@ if os.path.exists(pref):
 /usr/bin/python3 /home/baba/browser-agent/homie-extension/launch.py
 
 # Launch Chromium
-/usr/bin/chromium --new-window --force-device-scale-factor=1 \
+dbus-launch /usr/bin/chromium --new-window --force-device-scale-factor=1 \
   --load-extension=/home/baba/browser-agent/homie-extension \
   --window-size=1200,600 --window-position=0,0 \
   --no-first-run --no-default-browser-check --disable-session-restore
