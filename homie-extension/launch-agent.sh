@@ -8,8 +8,9 @@ export XDG_RUNTIME_DIR=/run/user/1000
 SCREEN=$(wlr-randr | grep "current" | grep -oP '\d+x\d+' | head -1)
 SCREEN_W=$(echo $SCREEN | cut -dx -f1)
 SCREEN_H=$(echo $SCREEN | cut -dx -f2)
-WIN_W=$(echo "$SCREEN_W * 70 / 100" | bc)
-WIN_H=$(echo "$SCREEN_H * 10 / 100" | bc)
+WIN_W=$(( SCREEN_W * 70 / 100 ))
+WIN_H=$(( SCREEN_H * 10 / 100 ))
+
 
 echo "Screen: ${SCREEN_W}x${SCREEN_H} → Window: ${WIN_W}x${WIN_H}" >> /tmp/browser_launch.log
 
