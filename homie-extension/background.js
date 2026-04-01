@@ -35,7 +35,7 @@ const state = {
   userToken:           null,
   lastUrl:             null,
   conversationHistory: [],
-  lastActions:         [], // tracks recent actions to detect stuck loops
+  lastActions:         [],
 };
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -122,12 +122,60 @@ chrome.tabs.onCreated.addListener(tab => {
 
 function getElements(tabId) {
   return new Promise(resolve => {
+    const timer = setTimeout(() => resolve([]), 3000);
     chrome.tabs.sendMessage(tabId, { type: 'GET_ELEMENTS' }, res => {
+      clearTimeout(timer);
       if (chrome.runtime.lastError || !res) resolve([]);
       else resolve(res.elements || []);
     });
-    setTimeout(() => resolve([]), 3000);
   });
+}
+
+// ── NEW: retry getElements up to N times if 0 elements returned ────
+async function getElementsWithRetry(tabId, retries = 3, delay = 500) {
+  for (let i = 0; i < retries; i++) {
+    const elements = await getElements(tabId);
+    if (elements.length > 0) return elements;
+    if (i < retries - 1) {
+      console.warn(`[Homie] getElements returned 0, retry ${i + 1}/${retries - 1}…`);
+      await sleep(delay);
+    }
+  }
+  console.warn('[Homie] getElements still 0 after all retries');
+  return [];
+}
+
+// ── NEW: wait until element count stops changing (DOM settled) ──────
+// Polls every 300ms. Resolves once the same non-zero count appears
+// `stableFor` consecutive times, or when timeout is reached.
+async function waitForStableDOM(tabId, timeout = 6000, stableFor = 2) {
+  const deadline  = Date.now() + timeout;
+  let lastCount   = -1;
+  let stableStreak = 0;
+
+  while (Date.now() < deadline) {
+    if (state.stopRequested) return [];
+
+    const elements = await getElements(tabId);
+    const count    = elements.length;
+
+    if (count > 0 && count === lastCount) {
+      stableStreak++;
+      if (stableStreak >= stableFor) {
+        console.log(`[Homie] DOM stable at ${count} elements`);
+        return elements;
+      }
+    } else {
+      stableStreak = 0;
+    }
+
+    lastCount = count;
+    await sleep(300);
+  }
+
+  // Timed out — return whatever is on the page now
+  console.warn('[Homie] waitForStableDOM timed out, proceeding anyway');
+  return await getElements(tabId);
 }
 
 function execAction(tabId, action) {
@@ -174,14 +222,11 @@ function emit(evt, data) {
 }
 
 // ── Strip screenshots from all steps except the current one ───────
-// Old screenshots are useless — AI already acted on them.
-// All text (URL, elements, task) is preserved for full context.
 function trimmedHistory(history) {
   return history.map((msg, i) => {
-    const isLast = i === history.length - 1; // only current step keeps its screenshot
-    if (msg.role === 'assistant') return msg; // assistant messages have no images anyway
-    if (isLast) return msg;                   // current step — send full with screenshot
-    // Older user messages — strip image_url block, keep all text intact
+    const isLast = i === history.length - 1;
+    if (msg.role === 'assistant') return msg;
+    if (isLast) return msg;
     if (Array.isArray(msg.content)) {
       return { ...msg, content: msg.content.filter(c => c.type !== 'image_url') };
     }
@@ -194,7 +239,6 @@ function isStuckInLoop() {
   const last = state.lastActions;
   if (last.length < 4) return false;
   const recent = last.slice(-4);
-  // Stuck if last 4 actions are all 'type' with the same text
   return recent.every(a => a.action === 'type' && a.text === recent[0].text);
 }
 
@@ -246,15 +290,17 @@ async function runAgent() {
     state.running = false;
     return;
   }
-const now = new Date();
-const currentDateTime = now.toLocaleString('en-IN', {
-  timeZone: 'Asia/Kolkata',
-  dateStyle: 'full',
-  timeStyle: 'short'
-});
+
+  const now = new Date();
+  const currentDateTime = now.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    dateStyle: 'full',
+    timeStyle: 'short'
+  });
+
   const systemPrompt = `You are a browser automation agent.
 Current date and time: ${currentDateTime}.
- You receive:
+You receive:
 1. A screenshot of the current browser page
 2. A numbered list of all interactive elements
 
@@ -287,7 +333,7 @@ RULES:
     4. Never try to type a date into a calendar picker — always click the date
 - After each navigation or major click, wait for the page to settle before acting
 - When the task is complete use done with a full helpful answer
-- Ater task completed if the task details are in that page give them to user`;
+- After task completed if the task details are in that page give them to user`;
 
   const MAX = 30;
 
@@ -301,14 +347,10 @@ RULES:
     // ── Stuck loop detection ────────────────────────────────────────
     if (isStuckInLoop()) {
       emit('warn', 'Detected stuck loop — recovering…');
-      // Press Escape to dismiss any partial dropdown or open state
       await execAction(tabId, { type: 'key', key: 'Escape' });
       await sleep(500);
-      // Reset loop tracker so detection resets
       state.lastActions = [];
-      // Trim last 6 history entries (3 full steps) so AI doesn't repeat the same mistake
       state.conversationHistory = state.conversationHistory.slice(0, -6);
-      // Inject a hint so AI knows what happened and tries differently
       state.conversationHistory.push({
         role: 'user',
         content: [{
@@ -322,9 +364,13 @@ RULES:
     state.step++;
     emit('status', { text: `Step ${state.step}…`, running: true, step: state.step });
 
+    // ── FIX: wait for DOM to fully settle before reading elements ──
+    emit('status', { text: `Waiting for page to settle… (step ${state.step})`, running: true, step: state.step });
+    await waitForStableDOM(tabId);
+
     const [screenshot, elements, pageInfo] = await Promise.all([
       captureTab(),
-      getElements(tabId),
+      getElementsWithRetry(tabId),   // ── FIX: retry on 0 elements
       new Promise(r => {
         chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_INFO' }, res => {
           chrome.runtime.lastError; r(res || {});
@@ -338,10 +384,14 @@ RULES:
     const elementList = formatElements(elements);
     emit('status', { text: `Thinking… (${elements.length} elements)`, running: true, step: state.step });
 
-    // Build user message — text always included, screenshot only on current step
+    // Warn in the prompt if we still ended up with no elements
+    const elementSection = elements.length === 0
+      ? 'WARNING: No interactive elements detected on this page yet. The page may still be loading or requires scrolling. Consider using a scroll or wait action.'
+      : `INTERACTIVE ELEMENTS:\n${elementList}`;
+
     const userContent = [{
       type: 'text',
-      text: `URL: ${pageInfo.url || 'unknown'}\nTitle: ${pageInfo.title || ''}\n\nINTERACTIVE ELEMENTS:\n${elementList}\n\nTask: ${state.task}\nWhat is your next action?`
+      text: `URL: ${pageInfo.url || 'unknown'}\nTitle: ${pageInfo.title || ''}\n\n${elementSection}\n\nTask: ${state.task}\nWhat is your next action?`
     }];
     if (screenshot) {
       userContent.push({ type: 'image_url', image_url: { url: screenshot } });
@@ -349,7 +399,6 @@ RULES:
 
     state.conversationHistory.push({ role: 'user', content: userContent });
 
-    // Send trimmed history — all text preserved, only old screenshots stripped
     const response = await callBackendAgent(trimmedHistory(state.conversationHistory), systemPrompt);
 
     if (state.stopRequested) { emit('done', 'Stopped.'); state.running = false; return; }
@@ -363,7 +412,6 @@ RULES:
     const aiAction = response.result;
     state.conversationHistory.push({ role: 'assistant', content: JSON.stringify(aiAction) });
 
-    // Track for loop detection
     state.lastActions.push(aiAction);
     if (state.lastActions.length > 10) state.lastActions.shift();
 
@@ -392,7 +440,8 @@ RULES:
       await navigateTab(tabId, url);
       await waitForLoad(tabId);
       await injectAndWait(tabId);
-      await sleep(800);
+      // ── FIX: replace fixed sleep with stable DOM wait ──────────
+      await waitForStableDOM(tabId);
       continue;
     }
 
@@ -400,10 +449,10 @@ RULES:
       emit('action', { step: state.step, action: aiAction });
       const result = await execAction(tabId, { type: 'click', index: aiAction.index });
       if (!result.ok) emit('warn', `Click [${aiAction.index}] failed: ${result.error}`);
-      await sleep(600);
+      // ── FIX: wait for load then stable DOM, not just fixed sleeps
       await waitForLoad(tabId);
       await injectAndWait(tabId, 3000);
-      await sleep(400);
+      await waitForStableDOM(tabId);
       continue;
     }
 
@@ -414,24 +463,28 @@ RULES:
         text: aiAction.text || '', clear: aiAction.clear !== false
       });
       // Give React time to process input and render dropdown suggestions
-      await sleep(900);
+      // ── FIX: increased from 900ms + added a short stable check ──
+      await sleep(400);
+      await waitForStableDOM(tabId, 2500, 2);
       continue;
     }
 
     if (aiAction.action === 'key') {
       emit('action', { step: state.step, action: aiAction });
       await execAction(tabId, { type: 'key', key: aiAction.key, keys: aiAction.key });
-      await sleep(600);
       await waitForLoad(tabId);
       await injectAndWait(tabId, 3000);
-      await sleep(400);
+      // ── FIX: stable DOM instead of fixed sleep ─────────────────
+      await waitForStableDOM(tabId);
       continue;
     }
 
     if (aiAction.action === 'scroll') {
       emit('action', { step: state.step, action: aiAction });
       await execAction(tabId, { type: 'scroll', scroll_x: 0, scroll_y: aiAction.scroll_y || 400 });
-      await sleep(400);
+      // ── FIX: short stable wait so newly revealed elements are counted
+      await sleep(200);
+      await waitForStableDOM(tabId, 2000, 2);
       continue;
     }
 
