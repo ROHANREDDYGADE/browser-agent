@@ -39,5 +39,5 @@ if os.path.exists(pref):
   --window-size=${WIN_W},${WIN_H} \
   --window-position=0,0 \
   --no-first-run --no-default-browser-check --disable-session-restore \
-  --ozone-platform=wayland &
+  --ozone-platform=wayland 
 
